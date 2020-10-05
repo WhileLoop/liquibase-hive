@@ -1,5 +1,6 @@
 package liquibase.ext.metastore.lockservice;
 
+import liquibase.Scope;
 import liquibase.configuration.LiquibaseConfiguration;
 import liquibase.database.Database;
 import liquibase.database.ObjectQuotingStrategy;
@@ -26,7 +27,6 @@ import static java.text.MessageFormat.format;
 
 public class MetastoreLockService extends StandardLockService {
 
-    private static final Logger LOG = LogFactory.getInstance().getLog();
     private ObjectQuotingStrategy quotingStrategy;
     private Boolean lockDb = LiquibaseConfiguration.getInstance().getConfiguration(HiveMetastoreConfiguration.class).getLock();
 
@@ -45,17 +45,17 @@ public class MetastoreLockService extends StandardLockService {
         boolean hasChangeLogLockTable = false;
         try (Connection con = ((HiveDatabase) database).connect();
              Statement statement = con.createStatement()) {
-            LOG.info("Looking for table '" + database.getDatabaseChangeLogLockTableName() + "'");
+            Scope.getCurrentScope().getLog(getClass()).info("Looking for table '" + database.getDatabaseChangeLogLockTableName() + "'");
             try (ResultSet set = statement.executeQuery(format("SELECT id FROM {0}", database.escapeTableName(database.getLiquibaseCatalogName(), database.getLiquibaseSchemaName(), database.getDatabaseChangeLogLockTableName())))) {
                 hasChangeLogLockTable = true;
 
             } catch (SQLException e) {
-                LOG.info("Table '" + database.getDatabaseChangeLogLockTableName() + "' doesn't exists in hive metastore.");
+                Scope.getCurrentScope().getLog(getClass()).info("Table '" + database.getDatabaseChangeLogLockTableName() + "' doesn't exists in hive metastore.");
                 hasChangeLogLockTable = false;
 
             }
         } catch (InstantiationException | IllegalAccessException | SQLException e) {
-            LOG.warning("can't perform query", e);
+            Scope.getCurrentScope().getLog(getClass()).warning("can't perform query", e);
         }
         return hasChangeLogLockTable;
     }
@@ -69,7 +69,7 @@ public class MetastoreLockService extends StandardLockService {
                 database.setObjectQuotingStrategy(this.quotingStrategy);
             }
 
-            Executor executor = ExecutorService.getInstance().getExecutor(database);
+            Executor executor = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database);
             try {
                 if (this.hasDatabaseChangeLogLockTable()) {
                     executor.comment("Release hive metastore database lock");
@@ -85,10 +85,10 @@ public class MetastoreLockService extends StandardLockService {
 
                     database.setCanCacheLiquibaseTableInfo(false);
 
-                    LOG.info("Change log lock has been successfully released");
+                    Scope.getCurrentScope().getLog(getClass()).info("Change log lock has been successfully released");
                     database.rollback();
                 } catch (DatabaseException e) {
-                    LOG.warning("Rollback failed", e);
+                    Scope.getCurrentScope().getLog(getClass()).warning("Rollback failed", e);
                 }
                 if (incomingQuotingStrategy != null) {
                     database.setObjectQuotingStrategy(incomingQuotingStrategy);
@@ -105,13 +105,13 @@ public class MetastoreLockService extends StandardLockService {
 
         quotingStrategy = database.getObjectQuotingStrategy();
 
-        Executor executor = ExecutorService.getInstance().getExecutor(database);
+        Executor executor = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database);
 
         try {
             database.rollback();
             init();
 
-            Boolean locked = ExecutorService.getInstance().getExecutor(database).queryForObject(new SelectFromDatabaseChangeLogLockStatement("LOCKED"), Boolean.class);
+            Boolean locked = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).queryForObject(new SelectFromDatabaseChangeLogLockStatement("LOCKED"), Boolean.class);
 
             if (locked != null && locked) {
                 return false;
@@ -120,7 +120,7 @@ public class MetastoreLockService extends StandardLockService {
                 executor.comment("Lock hive metastore database");
                 executor.execute(new LockDatabaseChangeLogStatement());
                 database.commit();
-                LOG.info("Change log lock has been successfully acquired");
+                Scope.getCurrentScope().getLog(getClass()).info("Change log lock has been successfully acquired");
 
                 hasChangeLogLock = true;
 
@@ -133,7 +133,7 @@ public class MetastoreLockService extends StandardLockService {
             try {
                 database.rollback();
             } catch (DatabaseException e) {
-                LOG.warning("Rollback failed", e);
+                Scope.getCurrentScope().getLog(getClass()).warning("Rollback failed", e);
             }
         }
     }

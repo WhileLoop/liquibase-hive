@@ -28,6 +28,7 @@ import liquibase.statement.SqlStatement;
 import liquibase.statement.core.*;
 import liquibase.structure.core.Column;
 import liquibase.structure.core.Table;
+import liquibase.Scope;
 
 import java.text.DateFormat;
 import java.text.ParseException;
@@ -36,7 +37,6 @@ import java.util.*;
 
 public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistoryService {
 
-    private static final Logger LOG = LogFactory.getInstance().getLog();
     private List<RanChangeSet> ranChangeSetList;
     private boolean serviceInitialized = false;
     private Boolean hasDatabaseChangeLogTable = null;
@@ -97,7 +97,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
             return;
         }
         Database database = getDatabase();
-        Executor executor = ExecutorService.getInstance().getExecutor(database);
+        Executor executor = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database);
 
         Table changeLogTable = null;
         try {
@@ -169,7 +169,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
             }
             // If there is no table in the database for recording change history create one.
             statementsToExecute.add(createTableStatement);
-            LOG.info("Creating database history table with name: " + getDatabase().escapeTableName(getLiquibaseCatalogName(), getLiquibaseSchemaName(), getDatabaseChangeLogTableName()));
+            Scope.getCurrentScope().getLog(getClass()).info("Creating database history table with name: " + getDatabase().escapeTableName(getLiquibaseCatalogName(), getLiquibaseSchemaName(), getDatabaseChangeLogTableName()));
         }
 
         for (SqlStatement sql : statementsToExecute) {
@@ -177,7 +177,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
                 executor.execute(sql);
                 getDatabase().commit();
             } else {
-                LOG.info("Cannot run " + sql.getClass().getSimpleName() + " on " + getDatabase().getShortName() + " when checking databasechangelog table");
+                Scope.getCurrentScope().getLog(getClass()).info("Cannot run " + sql.getClass().getSimpleName() + " on " + getDatabase().getShortName() + " when checking databasechangelog table");
             }
         }
         serviceInitialized = true;
@@ -201,7 +201,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
             String databaseChangeLogTableName = getDatabase().escapeObjectName(getDatabaseChangeLogTableName(), Table.class);
             List<RanChangeSet> ranChangeSetList = new ArrayList<RanChangeSet>();
             if (hasDatabaseChangeLogTable()) {
-                LOG.info("Reading from " + databaseChangeLogTableName);
+                Scope.getCurrentScope().getLog(getClass()).info("Reading from " + databaseChangeLogTableName);
                 List<Map<String, ?>> results = queryDatabaseChangeLogTable(database);
                 for (Map rs : results) {
                     String fileName = rs.get(concat("FILENAME")).toString();
@@ -234,7 +234,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
                         ranChangeSet.setOrderExecuted(orderExecuted);
                         ranChangeSetList.add(ranChangeSet);
                     } catch (IllegalArgumentException e) {
-                        LOG.severe("Unknown EXECTYPE from database: " + execType);
+                        Scope.getCurrentScope().getLog(getClass()).severe("Unknown EXECTYPE from database: " + execType);
                         throw e;
                     }
                 }
@@ -247,12 +247,12 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
 
     private List<Map<String, ?>> queryDatabaseChangeLogTable(Database database) throws DatabaseException {
         SelectFromDatabaseChangeLogStatement select = new SelectFromDatabaseChangeLogStatement(new ColumnConfig().setName("*").setComputed(true)).setOrderBy("DATEEXECUTED ASC", "ORDEREXECUTED ASC");
-        return ExecutorService.getInstance().getExecutor(database).queryForList(select);
+        return Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).queryForList(select);
     }
 
     @Override
     protected void replaceChecksum(ChangeSet changeSet) throws DatabaseException {
-        ExecutorService.getInstance().getExecutor(getDatabase()).execute(new UpdateChangeSetChecksumStatement(changeSet));
+        Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", getDatabase()).execute(new UpdateChangeSetChecksumStatement(changeSet));
 
         getDatabase().commit();
         reset();
@@ -271,7 +271,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
     public void setExecType(ChangeSet changeSet, ChangeSet.ExecType execType) throws DatabaseException {
         Database database = getDatabase();
 
-        ExecutorService.getInstance().getExecutor(database).execute(new MarkChangeSetRanStatement(changeSet, execType));
+        Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).execute(new MarkChangeSetRanStatement(changeSet, execType));
         getDatabase().commit();
         if (this.ranChangeSetList != null) {
             this.ranChangeSetList.add(new RanChangeSet(changeSet, execType, null, null));
@@ -282,7 +282,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
     @Override
     public void removeFromHistory(final ChangeSet changeSet) throws DatabaseException {
         Database database = getDatabase();
-        ExecutorService.getInstance().getExecutor(database).execute(new RemoveChangeSetRanStatusStatement(changeSet));
+        Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).execute(new RemoveChangeSetRanStatusStatement(changeSet));
         getDatabase().commit();
 
         if (this.ranChangeSetList != null) {
@@ -296,7 +296,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
             if (getDatabase().getConnection() == null) {
                 lastChangeSetSequenceValue = 0;
             } else {
-                lastChangeSetSequenceValue = ExecutorService.getInstance().getExecutor(getDatabase()).queryForInt(new GetNextChangeSetSequenceValueStatement());
+                lastChangeSetSequenceValue = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", getDatabase()).queryForInt(new GetNextChangeSetSequenceValueStatement());
             }
         }
 
@@ -306,9 +306,9 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
     @Override
     public void tag(final String tagString) throws DatabaseException {
         Database database = getDatabase();
-        Executor executor = ExecutorService.getInstance().getExecutor(database);
+        Executor executor = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database);
         try {
-            int totalRows = ExecutorService.getInstance().getExecutor(database).queryForInt(new SelectFromDatabaseChangeLogStatement(new ColumnConfig().setName("COUNT(*)", true)));
+            int totalRows = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).queryForInt(new SelectFromDatabaseChangeLogStatement(new ColumnConfig().setName("COUNT(*)", true)));
             if (totalRows == 0) {
                 ChangeSet emptyChangeSet = new ChangeSet(String.valueOf(new Date().getTime()), "liquibase", false, false, "liquibase-internal", null, null, getDatabase().getObjectQuotingStrategy(), null);
                 this.setExecType(emptyChangeSet, ChangeSet.ExecType.EXECUTED);
@@ -328,7 +328,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
 
     @Override
     public boolean tagExists(final String tag) throws DatabaseException {
-        int count = ExecutorService.getInstance().getExecutor(getDatabase()).queryForInt(new SelectFromDatabaseChangeLogStatement(new SelectFromDatabaseChangeLogStatement.ByTag(tag), new ColumnConfig().setName("COUNT(*)", true)));
+        int count = Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", getDatabase()).queryForInt(new SelectFromDatabaseChangeLogStatement(new SelectFromDatabaseChangeLogStatement.ByTag(tag), new ColumnConfig().setName("COUNT(*)", true)));
         return count > 0;
     }
 
@@ -337,7 +337,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
         Database database = getDatabase();
         UpdateStatement updateStatement = new UpdateStatement(database.getLiquibaseCatalogName(), database.getLiquibaseSchemaName(), database.getDatabaseChangeLogTableName());
         updateStatement.addNewColumnValue("MD5SUM", null);
-        ExecutorService.getInstance().getExecutor(database).execute(updateStatement);
+        Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).execute(updateStatement);
         database.commit();
     }
 
@@ -346,7 +346,7 @@ public class HiveStandardChangeLogHistoryService extends AbstractChangeLogHistor
         Database database = getDatabase();
         try {
             if (SnapshotGeneratorFactory.getInstance().has(new Table().setName(database.getDatabaseChangeLogTableName()).setSchema(database.getLiquibaseCatalogName(), database.getLiquibaseSchemaName()), database)) {
-                ExecutorService.getInstance().getExecutor(database).execute(new DropTableStatement(database.getLiquibaseCatalogName(), database.getLiquibaseSchemaName(), database.getDatabaseChangeLogTableName(), false));
+                Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", database).execute(new DropTableStatement(database.getLiquibaseCatalogName(), database.getLiquibaseSchemaName(), database.getDatabaseChangeLogTableName(), false));
             }
             reset();
         } catch (InvalidExampleException e) {

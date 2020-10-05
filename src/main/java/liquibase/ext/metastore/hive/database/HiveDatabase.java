@@ -5,8 +5,8 @@ import liquibase.database.DatabaseConnection;
 import liquibase.database.jvm.JdbcConnection;
 import liquibase.exception.DatabaseException;
 import liquibase.ext.metastore.database.HiveDatabaseConnectionWrapper;
-import liquibase.logging.LogService;
 import liquibase.logging.Logger;
+import liquibase.Scope;
 
 import java.lang.reflect.InvocationTargetException;
 import java.sql.*;
@@ -32,7 +32,6 @@ public class HiveDatabase extends AbstractJdbcDatabase {
             "WHERE", "WINDOW", "WITH", "COMMIT", "ONLY", "REGEXP", "RLIKE", "ROLLBACK", "START",
             "CACHE", "CONSTRAINT", "FOREIGN", "PRIMARY", "REFERENCES", "DAYOFWEEK", "EXTRACT",
             "FLOOR", "INTEGER", "PRECISION", "VIEWS");
-    private static final Logger LOG = LogService.getLog(HiveDatabase.class);
     private final String databaseProductName;
     private final String prefix;
     private final String databaseDriver;
@@ -187,10 +186,10 @@ public class HiveDatabase extends AbstractJdbcDatabase {
              ResultSet resultSet = statement.executeQuery(query)) {
             resultSet.next();
             String schema = resultSet.getString(1);
-            LOG.info("Schema name is '" + schema + "'");
+            Scope.getCurrentScope().getLog(getClass()).info("Schema name is '" + schema + "'");
             return schema;
         } catch (Exception e) {
-            LOG.info("Can't get default schema:", e);
+            Scope.getCurrentScope().getLog(getClass()).info("Can't get default schema:", e);
         }
         return null;
     }
